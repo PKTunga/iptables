@@ -121,7 +121,7 @@ echo "Allowlist updated, rules saved, and persistence enabled."
 
 # Clone the PHP script from GitHub
 cd /var/www/html
-sudo git clone <your-github-repo-url> .
+sudo git clone https://github.com/PKTunga/iptables.git .
 sudo chown -R www-data:www-data /var/www/html
 sudo chmod -R 755 /var/www/html
 
