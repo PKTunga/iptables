@@ -9,22 +9,39 @@ for file in $files; do
     sudo chmod 644 "$file"
 done
 
-# Function to check and install iptables if missing
+# Function to check and install iptables and netfilter-persistent if missing
 install_iptables() {
     if ! command -v iptables >/dev/null 2>&1; then
         echo "iptables not found. Installing..."
         sudo apt update && sudo apt install -y iptables || sudo yum install -y iptables
-        sudo systemctl enable iptables
-        sudo systemctl start iptables
     fi
 
     if ! command -v ip6tables >/dev/null 2>&1; then
         echo "ip6tables not found. Installing..."
         sudo apt update && sudo apt install -y iptables || sudo yum install -y iptables
     fi
+
+    if ! dpkg -l | grep -q git; then
+        echo "git not found. Installing..."
+        sudo apt install -y git
+    fi
+
+    if ! dpkg -l | grep -q netfilter-persistent; then
+        echo "netfilter-persistent not found. Installing..."
+        sudo apt install -y netfilter-persistent iptables-persistent
+        sudo systemctl enable netfilter-persistent
+        sudo systemctl start netfilter-persistent
+    fi
+
+    if ! command -v apache2 >/dev/null 2>&1; then
+        echo "Apache not found. Installing..."
+        sudo apt install -y apache2 php libapache2-mod-php git
+        sudo systemctl enable apache2
+        sudo systemctl start apache2
+    fi
 }
 
-# Ensure iptables is installed and enabled
+# Ensure iptables and netfilter-persistent are installed and enabled
 install_iptables
 
 # Ensure iptables config directory exists
@@ -85,14 +102,46 @@ sudo iptables -C INPUT -j DROP 2>/dev/null || sudo iptables -A INPUT -j DROP
 # Add default DROP rule for IPv6
 sudo ip6tables -C INPUT -j DROP 2>/dev/null || sudo ip6tables -A INPUT -j DROP
 
-
 # Save rules for persistence
-if [ ! -d "/etc/iptables" ]; then
-    sudo mkdir /etc/iptables
-    echo "Created /etc/iptables directory."
-fi
-
 sudo iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null
 sudo ip6tables-save | sudo tee /etc/iptables/rules.v6 > /dev/null
 
-echo "Allowlist updated and rules saved."
+# Ensure rules are restored on reboot
+echo "#!/bin/sh
+iptables-restore < /etc/iptables/rules.v4
+ip6tables-restore < /etc/iptables/rules.v6" | sudo tee /etc/network/if-pre-up.d/iptables > /dev/null
+
+sudo chmod +x /etc/network/if-pre-up.d/iptables
+
+# Restart netfilter-persistent service to apply rules
+sudo systemctl restart netfilter-persistent
+
+echo "Allowlist updated, rules saved, and persistence enabled."
+
+
+# Clone the PHP script from GitHub
+cd /var/www/html
+sudo git clone <your-github-repo-url> .
+sudo chown -R www-data:www-data /var/www/html
+sudo chmod -R 755 /var/www/html
+
+# Configure Apache virtual host
+echo "<VirtualHost *:80>
+    DocumentRoot /var/www/html
+    <Directory /var/www/html>
+        AllowOverride All
+        Require all granted
+    </Directory>
+    ErrorLog ${APACHE_LOG_DIR}/error.log
+    CustomLog ${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>" | sudo tee /etc/apache2/sites-available/000-default.conf > /dev/null
+
+# Restart Apache
+sudo systemctl restart apache2
+
+# Allow Apache to use iptables without password
+if ! sudo grep -q "www-data ALL=(ALL) NOPASSWD: /sbin/iptables" /etc/sudoers; then
+    echo "www-data ALL=(ALL) NOPASSWD: /sbin/iptables" | sudo tee -a /etc/sudoers
+fi
+
+echo "Allowlist updated, rules saved, PHP script deployed, and persistence enabled."
